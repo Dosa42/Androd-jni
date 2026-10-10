@@ -1,0 +1,71 @@
+name: Cross-compile CCX JNI libraries
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/build-ccx-jni.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check out CCX source
+        uses: actions/checkout@v4
+        with:
+          repository: Dosa42/ccx
+          ref: cd20d3d57142f588a52d17d4160b15251a5660c8
+          path: ccx-source
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: ccx-source/backend-go/go.mod
+          cache-dependency-path: ccx-source/backend-go/go.sum
+      - name: Install Android NDK
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;27.2.12479018"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+      - name: Compile all requested ABIs
+        working-directory: ccx-source/backend-go
+        shell: bash
+        run: |
+          export NDK_TOOLCHAIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          failed=0
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            unset GOARM
+            case "$abi" in
+              arm64-v8a)
+                export GOARCH=arm64
+                export CC="$NDK_TOOLCHAIN/aarch64-linux-android33-clang"
+                ;;
+              armeabi-v7a)
+                export GOARCH=arm GOARM=7
+                export CC="$NDK_TOOLCHAIN/armv7a-linux-androideabi33-clang"
+                ;;
+              x86_64)
+                export GOARCH=amd64
+                export CC="$NDK_TOOLCHAIN/x86_64-linux-android33-clang"
+                ;;
+            esac
+            echo "::group::Build $abi"
+            if CGO_ENABLED=1 GOOS=android go build -v -buildmode=c-shared -ldflags="-s -w" -o libccx.so .; then
+              mkdir -p "$GITHUB_WORKSPACE/app/src/main/jniLibs/$abi"
+              cp libccx.so "$GITHUB_WORKSPACE/app/src/main/jniLibs/$abi/libccx.so"
+            else
+              failed=1
+            fi
+            echo "::endgroup::"
+          done
+          exit "$failed"
+      - name: Commit compiled libraries
+        run: |
+          git add -f app/src/main/jniLibs/arm64-v8a/libccx.so app/src/main/jniLibs/armeabi-v7a/libccx.so app/src/main/jniLibs/x86_64/libccx.so
+          if ! git diff --cached --quiet; then
+            git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m "Add cross-compiled CCX JNI libraries"
+            git push origin HEAD:main
+          fi

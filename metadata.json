@@ -1,0 +1,6 @@
+{
+  "name": "InProcess Proxy",
+  "description": "Direct In-Process FFI Proxy for WebSockets, Socket.IO and SSE Streaming with JNI Callbacks",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

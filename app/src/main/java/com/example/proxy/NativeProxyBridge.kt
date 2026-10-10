@@ -1,10 +1,12 @@
 package com.example.proxy
 
 import android.util.Log
+import com.example.proxy.upstream.UpstreamNetworkBridge
 
 /**
  * Direct In-Process FFI & JNI Bridge.
- * Exposes native C++ function entry points and handles in-process JNI dispatching.
+ * Exposes native C++ function entry points and routes requests either through the
+ * in-process local protocol engine or outward to external remote servers.
  */
 object NativeProxyBridge {
     private const val TAG = "NativeProxyBridge"
@@ -48,8 +50,8 @@ object NativeProxyBridge {
 
     /**
      * In-process entry point invoked by Android clients.
-     * Dispatches to C++ JNI when libnative-proxy.so is loaded, or directly to the
-     * in-process engine maintaining identical JNI contracts and callback delivery.
+     * If upstreamUrl or a full URL is provided, forwards out to the external internet server.
+     * Otherwise dispatches to the in-process local FFI engine.
      */
     fun invokeProxyRequest(
         reqId: Long,
@@ -57,8 +59,31 @@ object NativeProxyBridge {
         path: String,
         headers: Array<String>,
         payload: ByteArray?,
-        callback: ProxyJniCallback
+        callback: ProxyJniCallback,
+        upstreamUrl: String? = null
     ): Int {
+        val targetUrl = upstreamUrl ?: if (
+            path.startsWith("ws://") ||
+            path.startsWith("wss://") ||
+            path.startsWith("http://") ||
+            path.startsWith("https://")
+        ) path else null
+
+        if (targetUrl != null) {
+            val proto = ProtocolType.entries.find { it.id == protocol } ?: ProtocolType.WEBSOCKET
+            Log.i(TAG, "Routing proxy request outward to upstream: $targetUrl (protocol=$proto)")
+            return when (proto) {
+                ProtocolType.HTTP_SSE -> {
+                    UpstreamNetworkBridge.openSse(reqId, targetUrl, callback)
+                    0
+                }
+                ProtocolType.WEBSOCKET, ProtocolType.SOCKET_IO -> {
+                    UpstreamNetworkBridge.openWebSocket(reqId, targetUrl, proto, callback)
+                    0
+                }
+            }
+        }
+
         return if (isNativeLibraryLoaded) {
             try {
                 proxyRequest(reqId, protocol, path, headers, payload, callback)
@@ -72,6 +97,10 @@ object NativeProxyBridge {
     }
 
     fun invokeCloseStream(reqId: Long): Int {
+        if (UpstreamNetworkBridge.isUpstream(reqId)) {
+            UpstreamNetworkBridge.closeUpstream(reqId)
+            return 0
+        }
         return if (isNativeLibraryLoaded) {
             try {
                 closeStream(reqId)

@@ -6,6 +6,11 @@ enum class ProtocolType(val id: Int, val displayName: String) {
     SOCKET_IO(3, "Socket.IO v4")
 }
 
+enum class RoutingMode(val displayName: String) {
+    IN_PROCESS_LOCAL("In-Process Local FFI"),
+    UPSTREAM_REMOTE("Upstream Internet Bridge")
+}
+
 enum class ConnectionStatus {
     DISCONNECTED,
     CONNECTING,
@@ -22,7 +27,8 @@ data class FrameLog(
     val opcodeName: String,
     val rawLength: Int,
     val payloadPreview: String,
-    val hexDump: String
+    val hexDump: String,
+    val isUpstream: Boolean = false
 )
 
 enum class Direction {
@@ -34,6 +40,8 @@ data class ConnectionCardState(
     val streamId: Long,
     val protocol: ProtocolType,
     val endpoint: String,
+    val routingMode: RoutingMode = RoutingMode.IN_PROCESS_LOCAL,
+    val upstreamUrl: String? = null,
     val status: ConnectionStatus,
     val activeSince: Long = System.currentTimeMillis(),
     val framesReceived: Long = 0,
@@ -54,5 +62,6 @@ data class ProxyServiceStats(
     val totalFrames: Long = 0,
     val totalBytes: Long = 0,
     val currentThroughputKbps: Double = 0.0,
-    val activeStreamsCount: Int = 0
+    val activeStreamsCount: Int = 0,
+    val upstreamStreamsCount: Int = 0
 )

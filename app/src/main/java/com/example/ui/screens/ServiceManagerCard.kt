@@ -134,6 +134,18 @@ fun ServiceManagerCard(
                     ),
                     border = AssistChipDefaults.assistChipBorder(borderColor = DarkCardBorder, enabled = true)
                 )
+
+                if (stats.upstreamStreamsCount > 0) {
+                    AssistChip(
+                        onClick = {},
+                        label = { Text("UPSTREAM: ${stats.upstreamStreamsCount}", fontFamily = FontFamily.Monospace, fontSize = 11.sp) },
+                        colors = AssistChipDefaults.assistChipColors(
+                            containerColor = DarkBackground,
+                            labelColor = CyberRose
+                        ),
+                        border = AssistChipDefaults.assistChipBorder(borderColor = DarkCardBorder, enabled = true)
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(14.dp))

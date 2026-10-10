@@ -81,8 +81,13 @@ class ProxyViewModel(application: Application) : AndroidViewModel(application) {
         _stats.value = _stats.value.copy(isServiceRunning = false)
     }
 
-    fun openNewStream(protocol: ProtocolType, endpoint: String) {
-        proxyService?.openSession(protocol, endpoint)
+    fun openNewStream(
+        protocol: ProtocolType,
+        endpoint: String,
+        routingMode: RoutingMode = RoutingMode.IN_PROCESS_LOCAL,
+        customUpstreamUrl: String? = null
+    ) {
+        proxyService?.openSession(protocol, endpoint, routingMode, customUpstreamUrl)
     }
 
     fun closeStream(streamId: Long) {

@@ -187,6 +187,16 @@ private fun FrameLogRow(log: FrameLog) {
                     fontWeight = FontWeight.Bold,
                     fontFamily = FontFamily.Monospace
                 )
+                if (log.isUpstream) {
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "[UPSTREAM]",
+                        color = CyberRose,
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
                     text = "${log.rawLength}B",

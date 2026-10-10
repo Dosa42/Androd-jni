@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.sp
 import com.example.proxy.ConnectionCardState
 import com.example.proxy.ConnectionStatus
 import com.example.proxy.ProtocolType
+import com.example.proxy.RoutingMode
 import com.example.ui.theme.*
 
 @Composable
@@ -87,7 +88,27 @@ fun ConnectionStatusCard(
                         )
                     }
 
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+
+                    // Routing Mode Pill
+                    val isUpstream = cardState.routingMode == RoutingMode.UPSTREAM_REMOTE
+                    val modeColor = if (isUpstream) CyberRose else CyberCyan
+                    Surface(
+                        color = modeColor.copy(alpha = 0.12f),
+                        shape = RoundedCornerShape(12.dp),
+                        border = androidx.compose.foundation.BorderStroke(0.8.dp, modeColor.copy(alpha = 0.4f))
+                    ) {
+                        Text(
+                            text = if (isUpstream) "UPSTREAM" else "LOCAL FFI",
+                            color = modeColor,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(6.dp))
 
                     // Status Pill
                     Row(
@@ -148,14 +169,25 @@ fun ConnectionStatusCard(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Endpoint Path
-            Text(
-                text = cardState.endpoint,
-                color = TextPrimary,
-                fontSize = 13.sp,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Medium
-            )
+            // Endpoint Path & Remote Upstream URL
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = cardState.endpoint,
+                    color = TextPrimary,
+                    fontSize = 13.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Medium
+                )
+                if (cardState.upstreamUrl != null) {
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "-> ${cardState.upstreamUrl}",
+                        color = CyberCyan,
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+            }
 
             if (cardState.detailInfo.isNotEmpty()) {
                 Text(

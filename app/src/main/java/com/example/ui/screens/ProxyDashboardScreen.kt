@@ -21,6 +21,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.proxy.ProtocolType
 import com.example.proxy.ProxyViewModel
+import com.example.proxy.RoutingMode
 import com.example.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -194,8 +195,8 @@ fun ProxyDashboardScreen(
     if (showNewStreamDialog) {
         NewStreamDialog(
             onDismiss = { showNewStreamDialog = false },
-            onConfirm = { protocol, path ->
-                viewModel.openNewStream(protocol, path)
+            onConfirm = { protocol, path, routingMode, upstreamUrl ->
+                viewModel.openNewStream(protocol, path, routingMode, upstreamUrl)
                 showNewStreamDialog = false
             }
         )
@@ -205,21 +206,50 @@ fun ProxyDashboardScreen(
 @Composable
 private fun NewStreamDialog(
     onDismiss: () -> Unit,
-    onConfirm: (ProtocolType, String) -> Unit
+    onConfirm: (ProtocolType, String, RoutingMode, String?) -> Unit
 ) {
     var selectedProtocol by remember { mutableStateOf(ProtocolType.WEBSOCKET) }
-    var endpointPath by remember { mutableStateOf("/ws/echo") }
+    var routingMode by remember { mutableStateOf(RoutingMode.UPSTREAM_REMOTE) }
+    var endpointPath by remember { mutableStateOf("/upstream/echo") }
+    var upstreamUrl by remember { mutableStateOf("wss://echo.websocket.events") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = DarkSurfaceElevated,
         title = {
-            Text("Open In-Process Stream", color = TextPrimary, fontWeight = FontWeight.Bold)
+            Text("Open Channel", color = TextPrimary, fontWeight = FontWeight.Bold)
         },
         text = {
             Column {
+                Text("Routing Destination:", color = TextSecondary, fontSize = 12.sp)
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    FilterChip(
+                        selected = routingMode == RoutingMode.UPSTREAM_REMOTE,
+                        onClick = {
+                            routingMode = RoutingMode.UPSTREAM_REMOTE
+                            upstreamUrl = when (selectedProtocol) {
+                                ProtocolType.WEBSOCKET -> "wss://echo.websocket.events"
+                                ProtocolType.HTTP_SSE -> "https://sse.dev/test"
+                                ProtocolType.SOCKET_IO -> "wss://echo.websocket.events"
+                            }
+                        },
+                        label = { Text("Remote Upstream", fontSize = 10.sp, color = CyberRose) }
+                    )
+                    FilterChip(
+                        selected = routingMode == RoutingMode.IN_PROCESS_LOCAL,
+                        onClick = { routingMode = RoutingMode.IN_PROCESS_LOCAL },
+                        label = { Text("In-Process FFI", fontSize = 10.sp, color = CyberCyan) }
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
                 Text("Select Protocol:", color = TextSecondary, fontSize = 12.sp)
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(6.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -230,9 +260,16 @@ private fun NewStreamDialog(
                             onClick = {
                                 selectedProtocol = proto
                                 endpointPath = when (proto) {
-                                    ProtocolType.HTTP_SSE -> "/api/stream/telemetry"
-                                    ProtocolType.WEBSOCKET -> "/ws/echo"
-                                    ProtocolType.SOCKET_IO -> "/socket.io/?EIO=4"
+                                    ProtocolType.HTTP_SSE -> if (routingMode == RoutingMode.UPSTREAM_REMOTE) "/upstream/sse" else "/api/stream/telemetry"
+                                    ProtocolType.WEBSOCKET -> if (routingMode == RoutingMode.UPSTREAM_REMOTE) "/upstream/echo" else "/ws/echo"
+                                    ProtocolType.SOCKET_IO -> if (routingMode == RoutingMode.UPSTREAM_REMOTE) "/upstream/socket.io" else "/socket.io/?EIO=4"
+                                }
+                                if (routingMode == RoutingMode.UPSTREAM_REMOTE) {
+                                    upstreamUrl = when (proto) {
+                                        ProtocolType.WEBSOCKET -> "wss://echo.websocket.events"
+                                        ProtocolType.HTTP_SSE -> "https://sse.dev/test"
+                                        ProtocolType.SOCKET_IO -> "wss://echo.websocket.events"
+                                    }
                                 }
                             },
                             label = { Text(proto.name, fontSize = 10.sp) }
@@ -240,12 +277,28 @@ private fun NewStreamDialog(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(12.dp))
+
+                if (routingMode == RoutingMode.UPSTREAM_REMOTE) {
+                    OutlinedTextField(
+                        value = upstreamUrl,
+                        onValueChange = { upstreamUrl = it },
+                        label = { Text("External Remote Server URL") },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = CyberRose,
+                            unfocusedBorderColor = DarkCardBorder,
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary
+                        )
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
 
                 OutlinedTextField(
                     value = endpointPath,
                     onValueChange = { endpointPath = it },
-                    label = { Text("Endpoint Path") },
+                    label = { Text("Internal Proxy Path / Identifier") },
                     modifier = Modifier.fillMaxWidth(),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = CyberCyan,
@@ -258,10 +311,21 @@ private fun NewStreamDialog(
         },
         confirmButton = {
             Button(
-                onClick = { onConfirm(selectedProtocol, endpointPath) },
-                colors = ButtonDefaults.buttonColors(containerColor = CyberCyan)
+                onClick = {
+                    onConfirm(
+                        selectedProtocol,
+                        endpointPath,
+                        routingMode,
+                        if (routingMode == RoutingMode.UPSTREAM_REMOTE) upstreamUrl else null
+                    )
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = if (routingMode == RoutingMode.UPSTREAM_REMOTE) CyberRose else CyberCyan)
             ) {
-                Text("Open Stream", color = DarkBackground, fontWeight = FontWeight.Bold)
+                Text(
+                    text = if (routingMode == RoutingMode.UPSTREAM_REMOTE) "Forward to Upstream" else "Open In-Process",
+                    color = DarkBackground,
+                    fontWeight = FontWeight.Bold
+                )
             }
         },
         dismissButton = {

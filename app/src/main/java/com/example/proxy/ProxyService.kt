@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import com.example.proxy.upstream.UpstreamNetworkBridge
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -67,7 +68,6 @@ class ProxyService : Service() {
         Log.i(TAG, "ProxyService onDestroy")
         metricsJob?.cancel()
         serviceScope.cancel()
-        // Close all active streams
         _connectionCards.value.keys.forEach { reqId ->
             NativeProxyBridge.invokeCloseStream(reqId)
         }
@@ -115,6 +115,8 @@ class ProxyService : Service() {
                 lastBytesCount = currentBytes
                 val throughputKbps = (deltaBytes * 8.0) / 1024.0
 
+                val upstreamCount = _connectionCards.value.values.count { it.routingMode == RoutingMode.UPSTREAM_REMOTE }
+
                 _stats.value = _stats.value.copy(
                     isServiceRunning = true,
                     uptimeSeconds = uptime,
@@ -122,7 +124,8 @@ class ProxyService : Service() {
                     totalFrames = totalFramesCount.get(),
                     totalBytes = currentBytes,
                     currentThroughputKbps = throughputKbps,
-                    activeStreamsCount = _connectionCards.value.size
+                    activeStreamsCount = _connectionCards.value.size,
+                    upstreamStreamsCount = upstreamCount
                 )
             }
         }
@@ -130,28 +133,53 @@ class ProxyService : Service() {
 
     /**
      * Initializes default demo connections:
-     * 1. Socket.IO v4 Session (Room general_inproc)
-     * 2. RFC 6455 Duplex Echo WebSocket
-     * 3. HTTP Server-Sent Events (SSE) telemetry stream
+     * 1. Socket.IO v4 Session (In-Process)
+     * 2. RFC 6455 Duplex Echo WebSocket (In-Process)
+     * 3. HTTP Server-Sent Events (SSE) telemetry stream (In-Process)
+     * 4. External Remote Upstream WebSocket (wss://echo.websocket.events)
      */
     fun initializeDefaultConnections() {
         if (_connectionCards.value.isEmpty()) {
-            openSession(ProtocolType.SOCKET_IO, "/socket.io/?EIO=4&transport=websocket")
-            openSession(ProtocolType.WEBSOCKET, "/ws/echo")
-            openSession(ProtocolType.HTTP_SSE, "/api/stream/telemetry")
+            openSession(ProtocolType.SOCKET_IO, "/socket.io/?EIO=4&transport=websocket", RoutingMode.IN_PROCESS_LOCAL)
+            openSession(ProtocolType.WEBSOCKET, "/ws/echo", RoutingMode.IN_PROCESS_LOCAL)
+            openSession(ProtocolType.HTTP_SSE, "/api/stream/telemetry", RoutingMode.IN_PROCESS_LOCAL)
+            openSession(
+                ProtocolType.WEBSOCKET,
+                "/upstream/echo",
+                RoutingMode.UPSTREAM_REMOTE,
+                customUpstreamUrl = "wss://echo.websocket.events"
+            )
         }
     }
 
-    fun openSession(protocol: ProtocolType, endpoint: String): Long {
+    fun openSession(
+        protocol: ProtocolType,
+        endpoint: String,
+        routingMode: RoutingMode = RoutingMode.IN_PROCESS_LOCAL,
+        customUpstreamUrl: String? = null
+    ): Long {
         val streamId = System.currentTimeMillis() + (1..999).random()
         totalRequestsCount.incrementAndGet()
+
+        val actualUpstreamUrl = if (routingMode == RoutingMode.UPSTREAM_REMOTE) {
+            customUpstreamUrl ?: when (protocol) {
+                ProtocolType.WEBSOCKET -> "wss://echo.websocket.events"
+                ProtocolType.HTTP_SSE -> "https://sse.dev/test"
+                ProtocolType.SOCKET_IO -> "wss://echo.websocket.events"
+            }
+        } else null
 
         val card = ConnectionCardState(
             streamId = streamId,
             protocol = protocol,
             endpoint = endpoint,
+            routingMode = routingMode,
+            upstreamUrl = actualUpstreamUrl,
             status = ConnectionStatus.CONNECTING,
-            detailInfo = "Handshaking over direct JNI..."
+            detailInfo = if (routingMode == RoutingMode.UPSTREAM_REMOTE)
+                "Connecting outward to $actualUpstreamUrl..."
+            else
+                "Handshaking over direct in-process JNI..."
         )
 
         _connectionCards.value = _connectionCards.value + (streamId to card)
@@ -178,7 +206,8 @@ class ProxyService : Service() {
                     opcodeName = "SSE_CHUNK",
                     rawLength = chunk.size,
                     payloadPreview = chunkText.take(120),
-                    payload = chunk
+                    payload = chunk,
+                    isUpstream = routingMode == RoutingMode.UPSTREAM_REMOTE
                 )
             }
 
@@ -220,7 +249,8 @@ class ProxyService : Service() {
                     opcodeName = opcodeName,
                     rawLength = payload.size,
                     payloadPreview = preview,
-                    payload = payload
+                    payload = payload,
+                    isUpstream = routingMode == RoutingMode.UPSTREAM_REMOTE
                 )
             }
 
@@ -235,14 +265,15 @@ class ProxyService : Service() {
             }
         }
 
-        // Call direct JNI function invocation
+        // Call direct JNI function invocation (routing inward or outward)
         NativeProxyBridge.invokeProxyRequest(
             reqId = streamId,
             protocol = protocol.id,
             path = endpoint,
-            headers = arrayOf("Host: inproc.proxy", "User-Agent: Android-FFI/1.0"),
+            headers = arrayOf("Host: proxy.service", "User-Agent: Android-FFI/1.0"),
             payload = null,
-            callback = jniCallback
+            callback = jniCallback,
+            upstreamUrl = actualUpstreamUrl
         )
 
         return streamId
@@ -278,18 +309,27 @@ class ProxyService : Service() {
             opcodeName = if (isBinary) "BINARY" else "TEXT",
             rawLength = rawData.size,
             payloadPreview = textPayload.take(120),
-            payload = rawData
+            payload = rawData,
+            isUpstream = card.routingMode == RoutingMode.UPSTREAM_REMOTE
         )
 
-        // Encode as client-masked frame for WebSocket
-        val frameToSend = if (card.protocol == ProtocolType.WEBSOCKET) {
-            val opcode = if (isBinary) 0x2 else 0x1
-            NativeProxyEngine.encodeWsFrame(opcode, rawData, fin = true, mask = true)
+        if (card.routingMode == RoutingMode.UPSTREAM_REMOTE) {
+            // Forward directly outward to remote internet server
+            if (isBinary) {
+                UpstreamNetworkBridge.sendUpstreamBinary(streamId, rawData)
+            } else {
+                UpstreamNetworkBridge.sendUpstreamFrame(streamId, textPayload)
+            }
         } else {
-            rawData
+            // Encode and dispatch to local in-process engine
+            val frameToSend = if (card.protocol == ProtocolType.WEBSOCKET) {
+                val opcode = if (isBinary) 0x2 else 0x1
+                NativeProxyEngine.encodeWsFrame(opcode, rawData, fin = true, mask = true)
+            } else {
+                rawData
+            }
+            NativeProxyEngine.processUpstreamFrame(streamId, frameToSend, isBinary)
         }
-
-        NativeProxyEngine.processUpstreamFrame(streamId, frameToSend, isBinary)
     }
 
     private fun updateCard(streamId: Long, transform: (ConnectionCardState) -> ConnectionCardState) {
@@ -307,7 +347,8 @@ class ProxyService : Service() {
         opcodeName: String,
         rawLength: Int,
         payloadPreview: String,
-        payload: ByteArray
+        payload: ByteArray,
+        isUpstream: Boolean = false
     ) {
         val hex = payload.take(16).joinToString(" ") { String.format("%02X", it) } +
                 if (payload.size > 16) " ..." else ""
@@ -318,7 +359,8 @@ class ProxyService : Service() {
             opcodeName = opcodeName,
             rawLength = rawLength,
             payloadPreview = payloadPreview,
-            hexDump = hex
+            hexDump = hex,
+            isUpstream = isUpstream
         )
 
         val updated = (_logs.value + newLog).takeLast(100)

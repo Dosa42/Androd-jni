@@ -1,0 +1,53 @@
+name: Build CCX Android libraries
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - build-ccx-android.sh
+      - .github/workflows/cross-compile-ccx.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  compile:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check out CCX
+        uses: actions/checkout@v4
+        with:
+          repository: Dosa42/ccx
+          ref: 2238324246cfa2e1e531c15847707b46b6495042
+          path: ccx-source
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: ccx-source/backend-go/go.mod
+          cache-dependency-path: ccx-source/backend-go/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: oven-sh/setup-bun@v2
+      - name: Build required embedded frontend
+        working-directory: ccx-source/frontend
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+          make -C ../backend-go copy-frontend
+      - name: Install Android NDK
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;27.2.12479018"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+      - name: Run specified cross-compilation commands
+        run: bash build-ccx-android.sh "$GITHUB_WORKSPACE/ccx-source/backend-go"
+      - name: Save libraries in the application
+        run: |
+          git add -f app/src/main/jniLibs/arm64-v8a/libccx.so app/src/main/jniLibs/armeabi-v7a/libccx.so app/src/main/jniLibs/x86_64/libccx.so
+          if ! git diff --cached --quiet; then
+            git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m "Add compiled CCX Android libraries"
+            git push origin HEAD:main
+          fi

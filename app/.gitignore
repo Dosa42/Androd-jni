@@ -1,1 +1,4 @@
-/build
+build/
+**/build/
+.cxx/
+.externalNativeBuild/

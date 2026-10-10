@@ -32,7 +32,7 @@ class ProxyService : Service() {
         ProxyServiceStats(
             isServiceRunning = true,
             isNativeLoaded = NativeProxyBridge.isNativeLibraryLoaded,
-            nativeLibraryMode = if (NativeProxyBridge.isNativeLibraryLoaded) "C++ NDK libnative-proxy.so" else "Direct In-Process FFI Engine"
+            nativeLibraryMode = NativeProxyBridge.activeNativeEngine
         )
     )
     val stats: StateFlow<ProxyServiceStats> = _stats.asStateFlow()

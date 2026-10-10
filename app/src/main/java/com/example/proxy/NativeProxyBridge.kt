@@ -14,15 +14,35 @@ object NativeProxyBridge {
     var isNativeLibraryLoaded: Boolean = false
         private set
 
+    var activeNativeEngine: String = "Direct In-Process FFI Engine"
+        private set
+
     init {
+        var loaded = false
         try {
-            System.loadLibrary("native-proxy")
+            System.loadLibrary("ccx")
             isNativeLibraryLoaded = true
-            Log.i(TAG, "Successfully loaded libnative-proxy.so via System.loadLibrary")
+            activeNativeEngine = "CCX Go Native Engine (libccx.so)"
+            Log.i(TAG, "Successfully loaded libccx.so (Go CCX Native Backend)")
             nativeInit()
+            loaded = true
         } catch (e: UnsatisfiedLinkError) {
-            isNativeLibraryLoaded = false
-            Log.w(TAG, "libnative-proxy.so not found on filesystem; using in-process Direct FFI engine: ${e.message}")
+            // libccx not present in current APK build
+        }
+
+        if (!loaded) {
+            try {
+                System.loadLibrary("native-proxy")
+                isNativeLibraryLoaded = true
+                activeNativeEngine = "C++ NDK libnative-proxy.so"
+                Log.i(TAG, "Successfully loaded libnative-proxy.so")
+                nativeInit()
+                loaded = true
+            } catch (e: UnsatisfiedLinkError) {
+                isNativeLibraryLoaded = false
+                activeNativeEngine = "Direct In-Process FFI Engine"
+                Log.i(TAG, "Native .so not bundled; using in-process Direct FFI engine")
+            }
         }
     }
 

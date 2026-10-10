@@ -13,6 +13,15 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        try {
+            com.ngrok.Runtime.load()
+            val port = com.example.tunnel.NgrokConfig.getLocalPort(this)
+            com.example.tunnel.NgrokTunnelManager.ensureLocalServerRunning(port, this)
+        } catch (t: Throwable) {
+            android.util.Log.w("MainActivity", "Ngrok native init note: ${t.message}")
+        }
+
         setContent {
             MyApplicationTheme {
                 val viewModel: ProxyViewModel = viewModel()

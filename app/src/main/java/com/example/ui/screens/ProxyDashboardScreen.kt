@@ -107,6 +107,11 @@ fun ProxyDashboardScreen(
                 )
             }
 
+            // 2. Ngrok Native Tunnel Ingress Telemetry Card
+            item {
+                NgrokTunnelCard()
+            }
+
             // 2. Section Header: Active Connection Status Cards
             item {
                 Row(

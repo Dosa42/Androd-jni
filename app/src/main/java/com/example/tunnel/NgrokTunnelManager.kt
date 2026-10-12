@@ -37,6 +37,7 @@ object NgrokTunnelManager {
   private var ngrokSession: Any? = null
   private var ngrokForwarder: Any? = null
   private val resourceMutex = Mutex()
+  private var loadBalancerIndex = 0
 
   private val _state = MutableStateFlow<TunnelState>(TunnelState.Disconnected())
   val state: StateFlow<TunnelState> = _state.asStateFlow()
@@ -69,7 +70,7 @@ object NgrokTunnelManager {
           httpServer = EmbeddedHttpServer(
             port = port,
             context = context,
-            onRequestHandled = { entry -> recordTraffic(entry) }
+            onRequestHandled = { entry -> recordTraffic(entry, context) }
           )
           httpServer?.start()
           currentServerPort = port
@@ -81,6 +82,15 @@ object NgrokTunnelManager {
     }
   }
 
+  fun getNextTargetUrl(context: Context): String {
+    val activeProfile = TunnelConfigManager.getActiveProfile(context)
+    val urls = activeProfile.targetUrls
+    if (urls.isEmpty()) return "http://127.0.0.1:8085"
+    val url = urls[loadBalancerIndex % urls.size]
+    loadBalancerIndex = (loadBalancerIndex + 1) % urls.size
+    return url
+  }
+
   fun startTunnel(context: Context, authTokenOverride: String? = null, portOverride: Int? = null) {
     val currentState = _state.value
     if (currentState is TunnelState.Connected || currentState is TunnelState.Connecting || currentState is TunnelState.Stopping) {
@@ -89,7 +99,7 @@ object NgrokTunnelManager {
     }
 
     val token = (authTokenOverride ?: NgrokConfig.getAuthToken(context)).trim()
-    val activeProfile = TunnelConfigManager.getActiveProfile(context)
+    val targetUrl = getNextTargetUrl(context)
     val requestedPort = portOverride ?: NgrokConfig.getLocalPort(context)
     val actualPort = findAvailablePort(requestedPort)
 
@@ -105,7 +115,7 @@ object NgrokTunnelManager {
         action = NgrokTunnelService.ACTION_START_TUNNEL
         putExtra(NgrokTunnelService.EXTRA_AUTH_TOKEN, token)
         putExtra(NgrokTunnelService.EXTRA_PORT, actualPort)
-        putExtra("extra_target_url", activeProfile.targetUrl)
+        putExtra("extra_target_url", targetUrl)
       }
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
         context.startForegroundService(serviceIntent)
@@ -117,7 +127,7 @@ object NgrokTunnelManager {
     }
   }
 
-  fun executeStartTunnel(token: String, port: Int, targetUrl: String = "http://127.0.0.1:$port") {
+  fun executeStartTunnel(token: String, port: Int, targetUrl: String) {
     tunnelJob?.cancel()
     tunnelJob = coroutineScope.launch {
       resourceMutex.withLock {
@@ -240,7 +250,7 @@ object NgrokTunnelManager {
     ngrokSession = null
   }
 
-  fun recordTraffic(entry: TrafficLogEntry) {
+  fun recordTraffic(entry: TrafficLogEntry, context: Context? = null) {
     _totalRequests.update { it + 1 }
     _trafficLogs.update { current ->
       (listOf(entry) + current).take(100)
@@ -248,6 +258,12 @@ object NgrokTunnelManager {
     val curr = _state.value
     if (curr is TunnelState.Connected) {
       _state.value = curr.copy(totalRequests = _totalRequests.value)
+    }
+    if (context != null) {
+      try {
+        val active = TunnelConfigManager.getActiveProfile(context)
+        TunnelConfigManager.recordMetrics(context, active.id, entry.responseDurationMs)
+      } catch (_: Exception) {}
     }
   }
 

@@ -175,9 +175,6 @@ class EmbeddedHttpServer(
               put("server_timestamp", System.currentTimeMillis())
               put("heartbeat_interval_ms", 3000)
               put("proxy_config", ReverseProxyManager.getFullConfigJson())
-              if (context != null) {
-                put("phone_telemetry", PhoneDeviceManager.getTelemetryJson(context))
-              }
             }.toString()
             sendResponse(output, 200, "application/json", jsonResp)
           }
@@ -221,20 +218,6 @@ class EmbeddedHttpServer(
             sendResponse(output, 200, "application/json", jsonResp)
           }
 
-          // 5. Phone Device Telemetry API
-          cleanPath == "/api/phone/status" || cleanPath == "/api/phone/telemetry" -> {
-            statusCode = 200
-            val json = if (context != null) {
-              PhoneDeviceManager.getTelemetryJson(context)
-            } else {
-              JSONObject().apply {
-                put("device_model", "${Build.MANUFACTURER} ${Build.MODEL}")
-                put("android_version", Build.VERSION.RELEASE)
-                put("sdk_int", Build.VERSION.SDK_INT)
-              }
-            }
-            sendResponse(output, 200, "application/json", json.toString(2))
-          }
 
           // 6. Reverse Proxy Configuration API
           cleanPath == "/api/proxy/config" -> {
@@ -336,20 +319,12 @@ class EmbeddedHttpServer(
             else
               """<span style="background: #F59E0B; color: #78350F; padding: 4px 12px; border-radius: 999px; font-weight: bold; font-size: 13px;">🟡 WAITING FOR PAIRING</span>"""
 
-            val phoneStats = if (context != null) PhoneDeviceManager.getTelemetry(context) else null
-            val batteryText = if (phoneStats != null) "${phoneStats.batteryPercent}% (${phoneStats.chargingType})" else "100%"
-            val networkText = phoneStats?.networkType ?: "Active"
-            val ipText = phoneStats?.localIpAddresses?.firstOrNull() ?: "127.0.0.1"
-            val storageText = if (phoneStats != null) "${phoneStats.storageFreeGb} GB free / ${phoneStats.storageTotalGb} GB" else "Available"
-            val ramText = if (phoneStats != null) "${phoneStats.ramFreeMb} MB free / ${phoneStats.ramTotalMb} MB" else "Available"
-            val uptimeText = phoneStats?.uptimeFormatted ?: "Running"
-
             val html = """
               <!DOCTYPE html>
               <html lang="en">
               <head>
                 <meta charset="utf-8">
-                <title>Ngrok Native Android Gateway Portal</title>
+                <title>Ngrok Native Android Gateway</title>
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
                 <style>
                   * { box-sizing: border-box; }
@@ -361,10 +336,6 @@ class EmbeddedHttpServer(
                   .hero-card { background: linear-gradient(135deg, #0A0F16 0%, #172230 100%); border: 2px dashed #0284C7; border-radius: 14px; padding: 20px; text-align: center; margin: 18px 0; }
                   .install-btn { display: inline-block; background: #10B981; color: #064E3B; font-weight: 800; font-size: 16px; padding: 12px 26px; border-radius: 10px; text-decoration: none; box-shadow: 0 4px 16px rgba(16,185,129,0.3); }
                   .section-title { font-size: 14px; font-weight: bold; color: #38BDF8; text-transform: uppercase; letter-spacing: 0.8px; margin: 20px 0 10px 0; }
-                  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
-                  .card { background: #0A0F16; border-radius: 12px; padding: 14px; border: 1px solid #223548; }
-                  .card-label { color: #94A3B8; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
-                  .card-value { color: #F1F5F9; font-weight: bold; font-size: 14px; }
                   .endpoint-btn { display: inline-block; background: #1E293B; color: #38BDF8; padding: 6px 12px; border-radius: 6px; text-decoration: none; font-family: monospace; font-size: 12px; margin: 4px; }
                 </style>
               </head>
@@ -372,49 +343,20 @@ class EmbeddedHttpServer(
                 <div class="container">
                   <div class="header">
                     <div>
-                      <h1>📱 Ngrok Native Android Gateway Portal</h1>
-                      <div class="subtitle">Unified Access: Live Telemetry &bull; In-Process Proxy &bull; Public Tunnel Ingress</div>
+                      <h1>⚡ Ngrok Native Gateway Portal</h1>
+                      <div class="subtitle">In-Process Proxy &bull; Public Tunnel Ingress</div>
                     </div>
                     <div>$bridgeStatusBadge</div>
                   </div>
 
                   <div class="hero-card">
                     <div style="font-size: 15px; font-weight: bold; color: #F8FAFC; margin-bottom: 6px;">⚡ Companion Userscript Bridge</div>
-                    <p style="font-size: 13px; color: #94A3B8; margin-bottom: 16px;">Bidirectional pairing with Android phone server & in-process proxy engine.</p>
+                    <p style="font-size: 13px; color: #94A3B8; margin-bottom: 16px;">Bidirectional pairing with in-process proxy engine.</p>
                     <a href="$effectiveBaseUrl/Proxy-Redirect.user.js" class="install-btn">⚡ 1-Click Install Userscript</a>
                   </div>
 
-                  <div class="section-title">📱 Live Phone Device Telemetry</div>
-                  <div class="grid">
-                    <div class="card">
-                      <div class="card-label">Device Model</div>
-                      <div class="card-value">${Build.MANUFACTURER} ${Build.MODEL}</div>
-                    </div>
-                    <div class="card">
-                      <div class="card-label">Android OS</div>
-                      <div class="card-value">Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})</div>
-                    </div>
-                    <div class="card">
-                      <div class="card-label">Battery Level</div>
-                      <div class="card-value" style="color: #10B981;">$batteryText</div>
-                    </div>
-                    <div class="card">
-                      <div class="card-label">Network Transport</div>
-                      <div class="card-value">$networkText</div>
-                    </div>
-                    <div class="card">
-                      <div class="card-label">Device IP</div>
-                      <div class="card-value" style="font-family: monospace; font-size: 12px;">$ipText</div>
-                    </div>
-                    <div class="card">
-                      <div class="card-label">System Uptime</div>
-                      <div class="card-value">$uptimeText</div>
-                    </div>
-                  </div>
-
-                  <div class="section-title">🌐 Live Gateway Endpoints</div>
+                  <div class="section-title">🌐 Gateway Endpoints</div>
                   <div style="background: #0A0F16; padding: 14px; border-radius: 12px; border: 1px solid #223548;">
-                    <a class="endpoint-btn" href="$effectiveBaseUrl/api/phone/status">/api/phone/status</a>
                     <a class="endpoint-btn" href="$effectiveBaseUrl/api/proxy/config">/api/proxy/config</a>
                     <a class="endpoint-btn" href="$effectiveBaseUrl/ping">/ping</a>
                     <a class="endpoint-btn" href="$effectiveBaseUrl/status">/status</a>

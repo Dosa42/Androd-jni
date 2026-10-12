@@ -50,6 +50,7 @@ fun NgrokTunnelCard(
     var isPinging by remember { mutableStateOf(false) }
 
     val activeProfile = TunnelConfigManager.getActiveProfile(context)
+    val sysParams = TunnelConfigManager.getSystemParameters(context)
 
     val statusColor = when (tunnelState) {
         is TunnelState.Connected -> CyberEmerald
@@ -92,7 +93,7 @@ fun NgrokTunnelCard(
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "NGROK DYNAMIC TUNNEL",
+                                text = "NGROK DYNAMIC CLOUD",
                                 color = Color(0xFF38BDF8),
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
@@ -141,7 +142,7 @@ fun NgrokTunnelCard(
                 ) {
                     Icon(
                         imageVector = Icons.Default.Settings,
-                        contentDescription = "Configure Tunnel Host",
+                        contentDescription = "Configure Tunnel Host & System",
                         tint = TextSecondary,
                         modifier = Modifier.size(18.dp)
                     )
@@ -205,7 +206,7 @@ fun NgrokTunnelCard(
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Text(
-                                    text = "Host Target: ${activeProfile.name}",
+                                    text = "Host: ${activeProfile.name}" + if (activeProfile.clientBackend.isEnabled) " [Custom REST Cloud]" else "",
                                     color = TextSecondary,
                                     fontSize = 11.sp,
                                     fontFamily = FontFamily.Monospace
@@ -330,13 +331,15 @@ fun NgrokTunnelCard(
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold
                         )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = "Target: ${activeProfile.targetUrl}",
-                            color = TextSecondary,
-                            fontSize = 11.sp,
-                            fontFamily = FontFamily.Monospace
-                        )
+                        if (activeProfile.clientBackend.isEnabled) {
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "Cloud Client Backend: ${activeProfile.clientBackend.restEndpoint}",
+                                color = Color(0xFF818CF8),
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
                         Spacer(modifier = Modifier.height(10.dp))
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -349,7 +352,7 @@ fun NgrokTunnelCard(
                             ) {
                                 Icon(Icons.Default.Tune, contentDescription = null, modifier = Modifier.size(14.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Manage Hosts & Headers", fontSize = 11.sp)
+                                Text("Manage Hosts & System", fontSize = 11.sp)
                             }
 
                             Button(
@@ -398,7 +401,7 @@ fun NgrokTunnelCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "Live Ingress Traffic Logs (${trafficLogs.size})",
+                    text = "Live Ingress Traffic Logs (${trafficLogs.size}) [Buffer Max: ${sysParams.trafficLogMaxEntries}]",
                     color = TextSecondary,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.SemiBold
@@ -427,7 +430,7 @@ fun NgrokTunnelCard(
                         )
                     } else {
                         LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            items(trafficLogs.take(15)) { entry ->
+                            items(trafficLogs.take(sysParams.trafficLogMaxEntries)) { entry ->
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -483,121 +486,219 @@ fun TunnelHostConfigDialog(
     var profiles by remember { mutableStateOf(TunnelConfigManager.getProfiles(context)) }
     var activeProfile by remember { mutableStateOf(TunnelConfigManager.getActiveProfile(context)) }
     var token by remember { mutableStateOf(NgrokConfig.getAuthToken(context)) }
+    var sysParams by remember { mutableStateOf(TunnelConfigManager.getSystemParameters(context)) }
 
     var editingProfile by remember { mutableStateOf<TunnelHostProfile?>(null) }
     var showAddEditSheet by remember { mutableStateOf(false) }
+    var showSystemParamsTab by remember { mutableStateOf(false) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = DarkSurfaceElevated,
         title = {
-            Text("Dynamic Tunnel Host & Header Setup", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Dynamic Host & System Setup", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(onClick = { showSystemParamsTab = false }) {
+                        Text("Hosts", color = if (!showSystemParamsTab) CyberCyan else TextMuted, fontSize = 11.sp)
+                    }
+                    TextButton(onClick = { showSystemParamsTab = true }) {
+                        Text("System Config", color = if (showSystemParamsTab) CyberCyan else TextMuted, fontSize = 11.sp)
+                    }
+                }
+            }
         },
         text = {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = 420.dp)
+                    .heightIn(max = 440.dp)
             ) {
-                OutlinedTextField(
-                    value = token,
-                    onValueChange = {
-                        token = it
-                        NgrokConfig.setAuthToken(context, it)
-                    },
-                    label = { Text("Ngrok Authtoken") },
-                    placeholder = { Text("2abc...xyz") },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = Color(0xFF0066F5),
-                        unfocusedBorderColor = DarkCardBorder,
-                        focusedTextColor = TextPrimary,
-                        unfocusedTextColor = TextPrimary
+                if (!showSystemParamsTab) {
+                    OutlinedTextField(
+                        value = token,
+                        onValueChange = {
+                            token = it
+                            NgrokConfig.setAuthToken(context, it)
+                        },
+                        label = { Text("Ngrok Authtoken") },
+                        placeholder = { Text("2abc...xyz") },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Color(0xFF0066F5),
+                            unfocusedBorderColor = DarkCardBorder,
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary
+                        )
                     )
-                )
 
-                Spacer(modifier = Modifier.height(14.dp))
+                    Spacer(modifier = Modifier.height(14.dp))
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Configured Host Profiles", color = CyberCyan, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                    TextButton(onClick = {
-                        editingProfile = TunnelHostProfile(name = "New Host Target", targetUrl = "http://127.0.0.1:8085")
-                        showAddEditSheet = true
-                    }) {
-                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Add Host", fontSize = 11.sp)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Configured Host Profiles", color = CyberCyan, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        TextButton(onClick = {
+                            editingProfile = TunnelHostProfile(
+                                name = "New Cloud Host",
+                                targetUrls = listOf("http://127.0.0.1:8085")
+                            )
+                            showAddEditSheet = true
+                        }) {
+                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Add Host", fontSize = 11.sp)
+                        }
                     }
-                }
 
-                Spacer(modifier = Modifier.height(6.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
 
-                LazyColumn(
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    items(profiles) { profile ->
-                        val isActive = profile.id == activeProfile.id
-                        Surface(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    TunnelConfigManager.setActiveProfileId(context, profile.id)
-                                    activeProfile = profile
-                                },
-                            color = if (isActive) Color(0xFF0066F5).copy(alpha = 0.2f) else DarkBackground,
-                            shape = RoundedCornerShape(8.dp),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, if (isActive) Color(0xFF0066F5) else DarkCardBorder)
-                        ) {
-                            Row(
+                    LazyColumn(
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        items(profiles) { profile ->
+                            val isActive = profile.id == activeProfile.id
+                            Surface(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(10.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                                    .clickable {
+                                        TunnelConfigManager.setActiveProfileId(context, profile.id)
+                                        activeProfile = profile
+                                    },
+                                color = if (isActive) Color(0xFF0066F5).copy(alpha = 0.2f) else DarkBackground,
+                                shape = RoundedCornerShape(8.dp),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, if (isActive) Color(0xFF0066F5) else DarkCardBorder)
                             ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = profile.name + if (isActive) " (ACTIVE)" else "",
-                                        color = if (isActive) CyberEmerald else TextPrimary,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 12.sp
-                                    )
-                                    Text(
-                                        text = profile.targetUrl,
-                                        color = TextSecondary,
-                                        fontSize = 10.sp,
-                                        fontFamily = FontFamily.Monospace
-                                    )
-                                }
-
-                                Row {
-                                    IconButton(
-                                        onClick = {
-                                            editingProfile = profile
-                                            showAddEditSheet = true
-                                        },
-                                        modifier = Modifier.size(28.dp)
-                                    ) {
-                                        Icon(Icons.Default.Edit, contentDescription = "Edit Host", tint = CyberCyan, modifier = Modifier.size(14.dp))
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(10.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = profile.name + if (isActive) " (ACTIVE)" else "",
+                                            color = if (isActive) CyberEmerald else TextPrimary,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 12.sp
+                                        )
+                                        Text(
+                                            text = "Targets: ${profile.targetUrls.size}" + if (profile.clientBackend.isEnabled) " [Custom REST Cloud]" else "",
+                                            color = TextSecondary,
+                                            fontSize = 10.sp,
+                                            fontFamily = FontFamily.Monospace
+                                        )
                                     }
-                                    if (profiles.size > 1) {
+
+                                    Row {
                                         IconButton(
                                             onClick = {
-                                                TunnelConfigManager.deleteProfile(context, profile.id)
-                                                profiles = TunnelConfigManager.getProfiles(context)
-                                                activeProfile = TunnelConfigManager.getActiveProfile(context)
+                                                editingProfile = profile
+                                                showAddEditSheet = true
                                             },
                                             modifier = Modifier.size(28.dp)
                                         ) {
-                                            Icon(Icons.Default.Delete, contentDescription = "Delete Host", tint = TextMuted, modifier = Modifier.size(14.dp))
+                                            Icon(Icons.Default.Edit, contentDescription = "Edit Host", tint = CyberCyan, modifier = Modifier.size(14.dp))
+                                        }
+                                        if (profiles.size > 1) {
+                                            IconButton(
+                                                onClick = {
+                                                    TunnelConfigManager.deleteProfile(context, profile.id)
+                                                    profiles = TunnelConfigManager.getProfiles(context)
+                                                    activeProfile = TunnelConfigManager.getActiveProfile(context)
+                                                },
+                                                modifier = Modifier.size(28.dp)
+                                            ) {
+                                                Icon(Icons.Default.Delete, contentDescription = "Delete Host", tint = TextMuted, modifier = Modifier.size(14.dp))
+                                            }
                                         }
                                     }
                                 }
+                            }
+                        }
+                    }
+                } else {
+                    // System Parameters Config Tab
+                    var connTimeout by remember { mutableStateOf(sysParams.connectTimeoutSeconds.toString()) }
+                    var readTimeout by remember { mutableStateOf(sysParams.readTimeoutSeconds.toString()) }
+                    var wakelockMins by remember { mutableStateOf(sysParams.wakelockDurationMinutes.toString()) }
+                    var pingSecs by remember { mutableStateOf(sysParams.pingIntervalSeconds.toString()) }
+                    var logMax by remember { mutableStateOf(sysParams.trafficLogMaxEntries.toString()) }
+
+                    LazyColumn(
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        item {
+                            Text("Global Network & Daemon Parameters", color = CyberCyan, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Spacer(modifier = Modifier.height(4.dp))
+                        }
+                        item {
+                            OutlinedTextField(
+                                value = connTimeout,
+                                onValueChange = { connTimeout = it },
+                                label = { Text("OkHttp Connect Timeout (Seconds)") },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                        item {
+                            OutlinedTextField(
+                                value = readTimeout,
+                                onValueChange = { readTimeout = it },
+                                label = { Text("OkHttp Read Timeout (Seconds)") },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                        item {
+                            OutlinedTextField(
+                                value = wakelockMins,
+                                onValueChange = { wakelockMins = it },
+                                label = { Text("Wakelock Duration (Minutes)") },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                        item {
+                            OutlinedTextField(
+                                value = pingSecs,
+                                onValueChange = { pingSecs = it },
+                                label = { Text("Ping Interval (Seconds)") },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                        item {
+                            OutlinedTextField(
+                                value = logMax,
+                                onValueChange = { logMax = it },
+                                label = { Text("Traffic Log Max Buffer Entries") },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                        item {
+                            Button(
+                                onClick = {
+                                    val newParams = SystemParameters(
+                                        connectTimeoutSeconds = connTimeout.toIntOrNull() ?: 15,
+                                        readTimeoutSeconds = readTimeout.toIntOrNull() ?: 30,
+                                        wakelockDurationMinutes = wakelockMins.toIntOrNull() ?: 60,
+                                        pingIntervalSeconds = pingSecs.toIntOrNull() ?: 20,
+                                        trafficLogMaxEntries = logMax.toIntOrNull() ?: 100
+                                    )
+                                    TunnelConfigManager.saveSystemParameters(context, newParams)
+                                    sysParams = newParams
+                                    Toast.makeText(context, "System parameters saved!", Toast.LENGTH_SHORT).show()
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = CyberCyan),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("Save System Parameters", color = DarkBackground, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -636,92 +737,217 @@ fun HostProfileEditDialog(
     onSave: (TunnelHostProfile) -> Unit
 ) {
     var name by remember { mutableStateOf(profile.name) }
-    var targetUrl by remember { mutableStateOf(profile.targetUrl) }
-    var customHeadersJson by remember { mutableStateOf(profile.customHeadersJson) }
+    var targetsText by remember { mutableStateOf(profile.targetUrls.joinToString("\n")) }
+    var pathRewritePrefix by remember { mutableStateOf(profile.pathRewritePrefix) }
+    var headers by remember { mutableStateOf(profile.customHeaders.toMutableStateList()) }
     var testPayload by remember { mutableStateOf(profile.testPayload) }
+
+    // Client Backend (Custom REST) state
+    var cbEnabled by remember { mutableStateOf(profile.clientBackend.isEnabled) }
+    var cbEndpoint by remember { mutableStateOf(profile.clientBackend.restEndpoint) }
+    var cbApiKey by remember { mutableStateOf(profile.clientBackend.apiKey) }
+    var cbHeaderKey by remember { mutableStateOf(profile.clientBackend.cloudHeaderKey) }
+    var cbHeaderVal by remember { mutableStateOf(profile.clientBackend.cloudHeaderValue) }
+
+    var newHeaderKey by remember { mutableStateOf("") }
+    var newHeaderVal by remember { mutableStateOf("") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = DarkSurfaceElevated,
         title = {
-            Text("Edit Host Target & Headers", color = TextPrimary, fontWeight = FontWeight.Bold)
+            Text("Edit Host Profile & Client Backend", color = TextPrimary, fontWeight = FontWeight.Bold)
         },
         text = {
-            Column(
+            LazyColumn(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = 380.dp)
+                    .heightIn(max = 420.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text("Profile Name") },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = CyberCyan,
-                        unfocusedBorderColor = DarkCardBorder,
-                        focusedTextColor = TextPrimary,
-                        unfocusedTextColor = TextPrimary
+                item {
+                    OutlinedTextField(
+                        value = name,
+                        onValueChange = { name = it },
+                        label = { Text("Profile Name") },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = CyberCyan,
+                            unfocusedBorderColor = DarkCardBorder,
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary
+                        )
                     )
-                )
+                }
 
-                Spacer(modifier = Modifier.height(8.dp))
-
-                OutlinedTextField(
-                    value = targetUrl,
-                    onValueChange = { targetUrl = it },
-                    label = { Text("Dynamic Target URL (e.g. http://127.0.0.1:8085)") },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = CyberCyan,
-                        unfocusedBorderColor = DarkCardBorder,
-                        focusedTextColor = TextPrimary,
-                        unfocusedTextColor = TextPrimary
+                item {
+                    OutlinedTextField(
+                        value = targetsText,
+                        onValueChange = { targetsText = it },
+                        label = { Text("Target URLs (One per line for Load Balancing)") },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 70.dp),
+                        textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace, fontSize = 11.sp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = CyberCyan,
+                            unfocusedBorderColor = DarkCardBorder,
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary
+                        )
                     )
-                )
+                }
 
-                Spacer(modifier = Modifier.height(8.dp))
+                // Client Backend (Custom REST) Section
+                item {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Surface(
+                        color = DarkBackground,
+                        shape = RoundedCornerShape(10.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF6366F1).copy(alpha = 0.5f))
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Client Backend (Custom REST)", color = Color(0xFF818CF8), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                Switch(
+                                    checked = cbEnabled,
+                                    onCheckedChange = { cbEnabled = it },
+                                    colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF6366F1))
+                                )
+                            }
 
-                OutlinedTextField(
-                    value = customHeadersJson,
-                    onValueChange = { customHeadersJson = it },
-                    label = { Text("Custom Headers (JSON Map)") },
-                    modifier = Modifier.fillMaxWidth(),
-                    textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace, fontSize = 11.sp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = CyberCyan,
-                        unfocusedBorderColor = DarkCardBorder,
-                        focusedTextColor = TextPrimary,
-                        unfocusedTextColor = TextPrimary
-                    )
-                )
+                            if (cbEnabled) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                OutlinedTextField(
+                                    value = cbEndpoint,
+                                    onValueChange = { cbEndpoint = it },
+                                    label = { Text("Custom REST Endpoint URL") },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace, fontSize = 11.sp)
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                OutlinedTextField(
+                                    value = cbApiKey,
+                                    onValueChange = { cbApiKey = it },
+                                    label = { Text("API Key / Token") },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace, fontSize = 11.sp)
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    OutlinedTextField(
+                                        value = cbHeaderKey,
+                                        onValueChange = { cbHeaderKey = it },
+                                        label = { Text("Header Key") },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    OutlinedTextField(
+                                        value = cbHeaderVal,
+                                        onValueChange = { cbHeaderVal = it },
+                                        label = { Text("Header Value") },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
 
-                Spacer(modifier = Modifier.height(8.dp))
+                item {
+                    Text("Custom Request Headers (Key-Value Builder)", color = CyberCyan, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                }
 
-                OutlinedTextField(
-                    value = testPayload,
-                    onValueChange = { testPayload = it },
-                    label = { Text("Default Test Payload") },
-                    modifier = Modifier.fillMaxWidth(),
-                    textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace, fontSize = 11.sp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = CyberCyan,
-                        unfocusedBorderColor = DarkCardBorder,
-                        focusedTextColor = TextPrimary,
-                        unfocusedTextColor = TextPrimary
-                    )
-                )
+                items(headers, key = { it.id }) { entry ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            value = entry.key,
+                            onValueChange = { k ->
+                                val idx = headers.indexOf(entry)
+                                if (idx >= 0) headers[idx] = entry.copy(key = k)
+                            },
+                            placeholder = { Text("Header Key") },
+                            modifier = Modifier.weight(1f),
+                            textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace, fontSize = 10.sp)
+                        )
+                        OutlinedTextField(
+                            value = entry.value,
+                            onValueChange = { v ->
+                                val idx = headers.indexOf(entry)
+                                if (idx >= 0) headers[idx] = entry.copy(value = v)
+                            },
+                            placeholder = { Text("Value") },
+                            modifier = Modifier.weight(1f),
+                            textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace, fontSize = 10.sp)
+                        )
+                        IconButton(
+                            onClick = { headers.remove(entry) },
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(Icons.Default.RemoveCircleOutline, contentDescription = "Remove Header", tint = CyberRose)
+                        }
+                    }
+                }
+
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            value = newHeaderKey,
+                            onValueChange = { newHeaderKey = it },
+                            placeholder = { Text("New Header Key") },
+                            modifier = Modifier.weight(1f),
+                            textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace, fontSize = 10.sp)
+                        )
+                        OutlinedTextField(
+                            value = newHeaderVal,
+                            onValueChange = { newHeaderVal = it },
+                            placeholder = { Text("Value") },
+                            modifier = Modifier.weight(1f),
+                            textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace, fontSize = 10.sp)
+                        )
+                        Button(
+                            onClick = {
+                                if (newHeaderKey.isNotBlank()) {
+                                    headers.add(HeaderEntry(key = newHeaderKey.trim(), value = newHeaderVal.trim()))
+                                    newHeaderKey = ""
+                                    newHeaderVal = ""
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = CyberCyan)
+                        ) {
+                            Text("Add", fontSize = 11.sp, color = DarkBackground, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
             }
         },
         confirmButton = {
             Button(
                 onClick = {
+                    val urls = targetsText.split("\n").map { it.trim() }.filter { it.isNotBlank() }
                     onSave(
                         profile.copy(
                             name = name.trim(),
-                            targetUrl = targetUrl.trim(),
-                            customHeadersJson = customHeadersJson.trim(),
-                            testPayload = testPayload.trim()
+                            targetUrls = if (urls.isNotEmpty()) urls else listOf("http://127.0.0.1:8085"),
+                            customHeaders = headers.toList(),
+                            clientBackend = ClientBackendConfig(
+                                isEnabled = cbEnabled,
+                                restEndpoint = cbEndpoint.trim(),
+                                apiKey = cbApiKey.trim(),
+                                cloudHeaderKey = cbHeaderKey.trim(),
+                                cloudHeaderValue = cbHeaderVal.trim()
+                            )
                         )
                     )
                 },

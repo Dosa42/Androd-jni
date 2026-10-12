@@ -89,6 +89,7 @@ object NgrokTunnelManager {
     }
 
     val token = (authTokenOverride ?: NgrokConfig.getAuthToken(context)).trim()
+    val activeProfile = TunnelConfigManager.getActiveProfile(context)
     val requestedPort = portOverride ?: NgrokConfig.getLocalPort(context)
     val actualPort = findAvailablePort(requestedPort)
 
@@ -104,6 +105,7 @@ object NgrokTunnelManager {
         action = NgrokTunnelService.ACTION_START_TUNNEL
         putExtra(NgrokTunnelService.EXTRA_AUTH_TOKEN, token)
         putExtra(NgrokTunnelService.EXTRA_PORT, actualPort)
+        putExtra("extra_target_url", activeProfile.targetUrl)
       }
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
         context.startForegroundService(serviceIntent)
@@ -115,7 +117,7 @@ object NgrokTunnelManager {
     }
   }
 
-  fun executeStartTunnel(token: String, port: Int) {
+  fun executeStartTunnel(token: String, port: Int, targetUrl: String = "http://127.0.0.1:$port") {
     tunnelJob?.cancel()
     tunnelJob = coroutineScope.launch {
       resourceMutex.withLock {
@@ -127,19 +129,21 @@ object NgrokTunnelManager {
           _state.value = TunnelState.Connecting("Initializing native Ngrok JNI runtime (libngrok_java.so)...")
           com.ngrok.Runtime.load()
 
-          // 2. Ensure the local embedded HTTP server is running on the target port
-          if (httpServer == null || httpServer?.isRunning == false || currentServerPort != port) {
-            _state.value = TunnelState.Connecting("Binding local TCP server on port $port...")
-            httpServer?.stop()
-            httpServer = EmbeddedHttpServer(
-              port = port,
-              onRequestHandled = { entry -> recordTraffic(entry) }
-            )
-            httpServer?.start()
-            currentServerPort = port
+          // 2. If target points to local companion port, ensure server running
+          if (targetUrl.contains("127.0.0.1") || targetUrl.contains("localhost")) {
+            if (httpServer == null || httpServer?.isRunning == false || currentServerPort != port) {
+              _state.value = TunnelState.Connecting("Binding local TCP server on port $port...")
+              httpServer?.stop()
+              httpServer = EmbeddedHttpServer(
+                port = port,
+                onRequestHandled = { entry -> recordTraffic(entry) }
+              )
+              httpServer?.start()
+              currentServerPort = port
+            }
           }
 
-          _state.value = TunnelState.Connecting("Connecting native Ngrok session to edge...")
+          _state.value = TunnelState.Connecting("Connecting native Ngrok session to edge ($targetUrl)...")
 
           // 3. Connect real native Ngrok session
           val sessionClass = Class.forName("com.ngrok.Session")
@@ -150,11 +154,11 @@ object NgrokTunnelManager {
           ngrokSession = session
           currentCoroutineContext().ensureActive()
 
-          // 4. Bind HTTP endpoint forwarder to local companion port
+          // 4. Bind HTTP endpoint forwarder to dynamic user-configured targetUrl
           val httpEndpointMethod = session.javaClass.getMethod("httpEndpoint")
           val endpointBuilder = httpEndpointMethod.invoke(session)
           val forwardMethod = endpointBuilder.javaClass.getMethod("forward", URL::class.java)
-          val forwarder = forwardMethod.invoke(endpointBuilder, URL("http://127.0.0.1:$port"))
+          val forwarder = forwardMethod.invoke(endpointBuilder, URL(targetUrl))
           ngrokForwarder = forwarder
           currentCoroutineContext().ensureActive()
 
@@ -177,7 +181,7 @@ object NgrokTunnelManager {
               statusCode = 200,
               clientIp = "127.0.0.1",
               responseDurationMs = 0,
-              message = "Tunnel established: $finalUrl -> http://127.0.0.1:$port"
+              message = "Tunnel established: $finalUrl -> $targetUrl"
             )
           )
 

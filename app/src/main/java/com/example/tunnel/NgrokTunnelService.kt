@@ -58,8 +58,9 @@ class NgrokTunnelService : Service() {
       ACTION_START_TUNNEL -> {
         val token = intent.getStringExtra(EXTRA_AUTH_TOKEN) ?: NgrokConfig.getAuthToken(this)
         val port = intent.getIntExtra(EXTRA_PORT, NgrokConfig.getLocalPort(this))
+        val targetUrl = intent.getStringExtra("extra_target_url") ?: "http://127.0.0.1:$port"
         startForeground(NOTIFICATION_ID, buildNotification("Initializing Ngrok Native Tunnel..."))
-        NgrokTunnelManager.executeStartTunnel(token, port)
+        NgrokTunnelManager.executeStartTunnel(token, port, targetUrl)
       }
 
       ACTION_STOP_TUNNEL -> {

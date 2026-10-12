@@ -49,6 +49,8 @@ fun NgrokTunnelCard(
     var pingResult by remember { mutableStateOf<String?>(null) }
     var isPinging by remember { mutableStateOf(false) }
 
+    val activeProfile = TunnelConfigManager.getActiveProfile(context)
+
     val statusColor = when (tunnelState) {
         is TunnelState.Connected -> CyberEmerald
         is TunnelState.Connecting -> CyberAmber
@@ -90,7 +92,7 @@ fun NgrokTunnelCard(
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "NGROK NATIVE TUNNEL",
+                                text = "NGROK DYNAMIC TUNNEL",
                                 color = Color(0xFF38BDF8),
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
@@ -139,7 +141,7 @@ fun NgrokTunnelCard(
                 ) {
                     Icon(
                         imageVector = Icons.Default.Settings,
-                        contentDescription = "Configure Ngrok",
+                        contentDescription = "Configure Tunnel Host",
                         tint = TextSecondary,
                         modifier = Modifier.size(18.dp)
                     )
@@ -151,7 +153,6 @@ fun NgrokTunnelCard(
             // Body depending on state
             when (val state = tunnelState) {
                 is TunnelState.Connected -> {
-                    // Connected State: Show Public URL, Local Port, and Action Buttons
                     Surface(
                         modifier = Modifier.fillMaxWidth(),
                         color = DarkBackground,
@@ -204,7 +205,7 @@ fun NgrokTunnelCard(
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Text(
-                                    text = "Forwarding: 127.0.0.1:${state.localPort}",
+                                    text = "Host Target: ${activeProfile.name}",
                                     color = TextSecondary,
                                     fontSize = 11.sp,
                                     fontFamily = FontFamily.Monospace
@@ -221,7 +222,6 @@ fun NgrokTunnelCard(
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    // Buttons: Test Ping & Stop Tunnel
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -288,7 +288,7 @@ fun NgrokTunnelCard(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.Error, contentDescription = null, tint = CyberRose, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Real Native Tunnel Fault", color = CyberRose, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Text("Tunnel Connection Fault", color = CyberRose, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                         }
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
@@ -304,7 +304,7 @@ fun NgrokTunnelCard(
                                 modifier = Modifier.weight(1f),
                                 colors = ButtonDefaults.outlinedButtonColors(contentColor = CyberCyan)
                             ) {
-                                Text("Check Token", fontSize = 11.sp)
+                                Text("Edit Config", fontSize = 11.sp)
                             }
                             Button(
                                 onClick = { NgrokTunnelManager.startTunnel(context) },
@@ -325,9 +325,17 @@ fun NgrokTunnelCard(
                             .padding(12.dp)
                     ) {
                         Text(
-                            text = "Expose local companion HTTP server and in-process streams to global internet over native Ngrok TLS ingress.",
+                            text = "Active Host Profile: ${activeProfile.name}",
+                            color = CyberCyan,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "Target: ${activeProfile.targetUrl}",
                             color = TextSecondary,
-                            fontSize = 12.sp
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace
                         )
                         Spacer(modifier = Modifier.height(10.dp))
                         Row(
@@ -335,12 +343,14 @@ fun NgrokTunnelCard(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = "Target Port: ${NgrokConfig.getLocalPort(context)}",
-                                color = TextMuted,
-                                fontSize = 11.sp,
-                                fontFamily = FontFamily.Monospace
-                            )
+                            TextButton(
+                                onClick = { showConfigDialog = true },
+                                colors = ButtonDefaults.textButtonColors(contentColor = TextSecondary)
+                            ) {
+                                Icon(Icons.Default.Tune, contentDescription = null, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Manage Hosts & Headers", fontSize = 11.sp)
+                            }
 
                             Button(
                                 onClick = {
@@ -356,7 +366,7 @@ fun NgrokTunnelCard(
                             ) {
                                 Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Start Ngrok Tunnel", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                Text("Start Tunnel", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -401,7 +411,6 @@ fun NgrokTunnelCard(
                 )
             }
 
-            // Collapsible Traffic Logs Drawer
             AnimatedVisibility(visible = showLogsExpanded) {
                 Column(
                     modifier = Modifier
@@ -460,47 +469,42 @@ fun NgrokTunnelCard(
     }
 
     if (showConfigDialog) {
-        NgrokConfigDialog(
-            onDismiss = { showConfigDialog = false },
-            onSaved = { token, port, autoStart ->
-                NgrokConfig.setAuthToken(context, token)
-                NgrokConfig.setLocalPort(context, port)
-                NgrokConfig.setAutoStartOnBoot(context, autoStart)
-                showConfigDialog = false
-                Toast.makeText(context, "Ngrok configuration saved!", Toast.LENGTH_SHORT).show()
-            }
+        TunnelHostConfigDialog(
+            onDismiss = { showConfigDialog = false }
         )
     }
 }
 
 @Composable
-fun NgrokConfigDialog(
-    onDismiss: () -> Unit,
-    onSaved: (String, Int, Boolean) -> Unit
+fun TunnelHostConfigDialog(
+    onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
+    var profiles by remember { mutableStateOf(TunnelConfigManager.getProfiles(context)) }
+    var activeProfile by remember { mutableStateOf(TunnelConfigManager.getActiveProfile(context)) }
     var token by remember { mutableStateOf(NgrokConfig.getAuthToken(context)) }
-    var portText by remember { mutableStateOf(NgrokConfig.getLocalPort(context).toString()) }
-    var autoStart by remember { mutableStateOf(NgrokConfig.isAutoStartOnBoot(context)) }
+
+    var editingProfile by remember { mutableStateOf<TunnelHostProfile?>(null) }
+    var showAddEditSheet by remember { mutableStateOf(false) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = DarkSurfaceElevated,
         title = {
-            Text("Ngrok Native Configuration", color = TextPrimary, fontWeight = FontWeight.Bold)
+            Text("Dynamic Tunnel Host & Header Setup", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 16.sp)
         },
         text = {
-            Column {
-                Text(
-                    text = "Enter your official authtoken from dashboard.ngrok.com. Tunnel connections are authentic and zero-mock.",
-                    color = TextSecondary,
-                    fontSize = 12.sp
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 420.dp)
+            ) {
                 OutlinedTextField(
                     value = token,
-                    onValueChange = { token = it },
+                    onValueChange = {
+                        token = it
+                        NgrokConfig.setAuthToken(context, it)
+                    },
                     label = { Text("Ngrok Authtoken") },
                     placeholder = { Text("2abc...xyz") },
                     modifier = Modifier.fillMaxWidth(),
@@ -512,12 +516,146 @@ fun NgrokConfigDialog(
                     )
                 )
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Configured Host Profiles", color = CyberCyan, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    TextButton(onClick = {
+                        editingProfile = TunnelHostProfile(name = "New Host Target", targetUrl = "http://127.0.0.1:8085")
+                        showAddEditSheet = true
+                    }) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Add Host", fontSize = 11.sp)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    items(profiles) { profile ->
+                        val isActive = profile.id == activeProfile.id
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    TunnelConfigManager.setActiveProfileId(context, profile.id)
+                                    activeProfile = profile
+                                },
+                            color = if (isActive) Color(0xFF0066F5).copy(alpha = 0.2f) else DarkBackground,
+                            shape = RoundedCornerShape(8.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, if (isActive) Color(0xFF0066F5) else DarkCardBorder)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = profile.name + if (isActive) " (ACTIVE)" else "",
+                                        color = if (isActive) CyberEmerald else TextPrimary,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 12.sp
+                                    )
+                                    Text(
+                                        text = profile.targetUrl,
+                                        color = TextSecondary,
+                                        fontSize = 10.sp,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
+
+                                Row {
+                                    IconButton(
+                                        onClick = {
+                                            editingProfile = profile
+                                            showAddEditSheet = true
+                                        },
+                                        modifier = Modifier.size(28.dp)
+                                    ) {
+                                        Icon(Icons.Default.Edit, contentDescription = "Edit Host", tint = CyberCyan, modifier = Modifier.size(14.dp))
+                                    }
+                                    if (profiles.size > 1) {
+                                        IconButton(
+                                            onClick = {
+                                                TunnelConfigManager.deleteProfile(context, profile.id)
+                                                profiles = TunnelConfigManager.getProfiles(context)
+                                                activeProfile = TunnelConfigManager.getActiveProfile(context)
+                                            },
+                                            modifier = Modifier.size(28.dp)
+                                        ) {
+                                            Icon(Icons.Default.Delete, contentDescription = "Delete Host", tint = TextMuted, modifier = Modifier.size(14.dp))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onDismiss,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0066F5))
+            ) {
+                Text("Close", color = Color.White, fontWeight = FontWeight.Bold)
+            }
+        }
+    )
+
+    if (showAddEditSheet && editingProfile != null) {
+        HostProfileEditDialog(
+            profile = editingProfile!!,
+            onDismiss = { showAddEditSheet = false },
+            onSave = { saved ->
+                TunnelConfigManager.addOrUpdateProfile(context, saved)
+                TunnelConfigManager.setActiveProfileId(context, saved.id)
+                profiles = TunnelConfigManager.getProfiles(context)
+                activeProfile = TunnelConfigManager.getActiveProfile(context)
+                showAddEditSheet = false
+            }
+        )
+    }
+}
+
+@Composable
+fun HostProfileEditDialog(
+    profile: TunnelHostProfile,
+    onDismiss: () -> Unit,
+    onSave: (TunnelHostProfile) -> Unit
+) {
+    var name by remember { mutableStateOf(profile.name) }
+    var targetUrl by remember { mutableStateOf(profile.targetUrl) }
+    var customHeadersJson by remember { mutableStateOf(profile.customHeadersJson) }
+    var testPayload by remember { mutableStateOf(profile.testPayload) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = DarkSurfaceElevated,
+        title = {
+            Text("Edit Host Target & Headers", color = TextPrimary, fontWeight = FontWeight.Bold)
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 380.dp)
+            ) {
                 OutlinedTextField(
-                    value = portText,
-                    onValueChange = { portText = it },
-                    label = { Text("Local Companion Port") },
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Profile Name") },
                     modifier = Modifier.fillMaxWidth(),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = CyberCyan,
@@ -527,31 +665,69 @@ fun NgrokConfigDialog(
                     )
                 )
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(8.dp))
 
-                Row(
+                OutlinedTextField(
+                    value = targetUrl,
+                    onValueChange = { targetUrl = it },
+                    label = { Text("Dynamic Target URL (e.g. http://127.0.0.1:8085)") },
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Auto-start tunnel on boot", color = TextPrimary, fontSize = 13.sp)
-                    Switch(
-                        checked = autoStart,
-                        onCheckedChange = { autoStart = it },
-                        colors = SwitchDefaults.colors(checkedThumbColor = CyberCyan)
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = CyberCyan,
+                        unfocusedBorderColor = DarkCardBorder,
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary
                     )
-                }
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                OutlinedTextField(
+                    value = customHeadersJson,
+                    onValueChange = { customHeadersJson = it },
+                    label = { Text("Custom Headers (JSON Map)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace, fontSize = 11.sp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = CyberCyan,
+                        unfocusedBorderColor = DarkCardBorder,
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary
+                    )
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                OutlinedTextField(
+                    value = testPayload,
+                    onValueChange = { testPayload = it },
+                    label = { Text("Default Test Payload") },
+                    modifier = Modifier.fillMaxWidth(),
+                    textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace, fontSize = 11.sp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = CyberCyan,
+                        unfocusedBorderColor = DarkCardBorder,
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary
+                    )
+                )
             }
         },
         confirmButton = {
             Button(
                 onClick = {
-                    val port = portText.toIntOrNull() ?: NgrokConfig.DEFAULT_LOCAL_PORT
-                    onSaved(token, port, autoStart)
+                    onSave(
+                        profile.copy(
+                            name = name.trim(),
+                            targetUrl = targetUrl.trim(),
+                            customHeadersJson = customHeadersJson.trim(),
+                            testPayload = testPayload.trim()
+                        )
+                    )
                 },
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0066F5))
+                colors = ButtonDefaults.buttonColors(containerColor = CyberCyan)
             ) {
-                Text("Save Configuration", color = Color.White, fontWeight = FontWeight.Bold)
+                Text("Save Host Profile", color = DarkBackground, fontWeight = FontWeight.Bold)
             }
         },
         dismissButton = {

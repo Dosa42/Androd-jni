@@ -123,7 +123,7 @@ object UpstreamNetworkBridge {
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                Log.e(TAG, "Upstream WS Failure on $targetUrl: ${t.message}")
+                Log.w(TAG, "Upstream WS offline/failure on $targetUrl: ${t.message}")
                 val errCode = response?.code ?: 502
                 callback.onStatus(connId, errCode, "UPSTREAM_ERR: ${t.message ?: "Connection failure"}")
                 activeUpstreamSessions.remove(connId)
@@ -198,7 +198,7 @@ object UpstreamNetworkBridge {
                 callback.onStatus(streamId, 1000, "UPSTREAM_SSE_COMPLETED")
             } catch (e: Exception) {
                 if (e !is CancellationException) {
-                    Log.e(TAG, "Upstream SSE stream exception: ${e.message}")
+                    Log.w(TAG, "Upstream SSE stream offline/exception: ${e.message}")
                     callback.onStatus(streamId, 502, "UPSTREAM_SSE_FAIL: ${e.message}")
                 }
             } finally {

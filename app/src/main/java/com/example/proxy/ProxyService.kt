@@ -56,7 +56,6 @@ class ProxyService : Service() {
         Log.i(TAG, "ProxyService onCreate (PID: ${android.os.Process.myPid()})")
         startForegroundServiceNotification()
         startMetricsTicker()
-        initializeDefaultConnections()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {

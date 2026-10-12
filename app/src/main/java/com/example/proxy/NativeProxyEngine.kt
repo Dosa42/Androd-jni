@@ -219,43 +219,19 @@ object NativeProxyEngine {
     fun getActiveStream(reqId: Long): StreamSession? = activeStreams[reqId]
 
     // ==========================================
-    // 3. HTTP Server-Sent Events (SSE) Chunk Pumper
+    // 3. HTTP Server-Sent Events (SSE) Stream
     // ==========================================
 
     private suspend fun startSseStream(session: StreamSession) {
         val streamId = session.reqId
-        var seq = 1L
-        while (session.isRunning.get()) {
-            val json = JSONObject().apply {
-                put("seq", seq)
-                put("timestamp", System.currentTimeMillis())
-                put("event_source", "inproc_sse_kernel")
-                put("stream_id", streamId)
-                put("cpu_load_pct", (15..45).random())
-                put("queue_depth", (0..12).random())
-            }
-
-            // Real HTTP chunked SSE framing:
-            // "id: <seq>\nevent: telemetry\ndata: <json>\n\n"
-            val rawChunkString = buildString {
-                append("id: ").append(seq).append("\n")
-                append("event: telemetry\n")
-                append("data: ").append(json.toString()).append("\n\n")
-            }
-            val chunkBytes = rawChunkString.toByteArray(Charsets.UTF_8)
-
-            // Direct invocation of raw JNI callback into JVM
-            session.callback.onSseChunk(
-                streamId = streamId,
-                event = "telemetry",
-                chunk = chunkBytes,
-                isLast = false
-            )
-
-            packetCounter.incrementAndGet()
-            seq++
-            delay(1200)
-        }
+        // Send initial connection establishment SSE chunk
+        val initEvent = "event: open\ndata: {\"status\":\"connected\",\"stream_id\":$streamId}\n\n"
+        session.callback.onSseChunk(
+            streamId = streamId,
+            event = "open",
+            chunk = initEvent.toByteArray(Charsets.UTF_8),
+            isLast = false
+        )
     }
 
     // ==========================================
@@ -264,37 +240,14 @@ object NativeProxyEngine {
 
     private suspend fun startWebSocketSession(session: StreamSession) {
         val connId = session.reqId
-
-        // Send Initial Handshake Welcome Frame (RFC 6455 Text Opcode 0x1)
-        val welcomeObj = JSONObject().apply {
-            put("type", "welcome")
+        // Handshake established - wait for actual duplex traffic from caller
+        val ackObj = JSONObject().apply {
+            put("status", "connected")
             put("conn_id", connId)
             put("protocol", "RFC6455_WEBSOCKET")
-            put("features", JSONArray(listOf("duplex", "in_process_ffi", "zero_copy")))
         }
-        val welcomeBytes = welcomeObj.toString().toByteArray(Charsets.UTF_8)
-        session.callback.onWsFrame(connId, 0x1, true, welcomeBytes)
-
-        // Periodic Ping/Pong & Telemetry Keep-alive
-        while (session.isRunning.get()) {
-            delay(4000)
-            if (!session.isRunning.get()) break
-
-            // Send standard RFC 6455 Ping frame (Opcode 0x9)
-            val pingPayload = ByteBuffer.allocate(8).putLong(System.currentTimeMillis()).array()
-            session.lastPingSent.set(System.currentTimeMillis())
-            session.callback.onWsFrame(connId, 0x9, true, pingPayload)
-
-            // Also send occasional duplex server broadcast (Opcode 0x1)
-            delay(2000)
-            if (!session.isRunning.get()) break
-            val telemetryObj = JSONObject().apply {
-                put("type", "server_push")
-                put("seq", packetCounter.incrementAndGet())
-                put("uptime_ms", System.currentTimeMillis())
-            }
-            session.callback.onWsFrame(connId, 0x1, true, telemetryObj.toString().toByteArray(Charsets.UTF_8))
-        }
+        val ackBytes = ackObj.toString().toByteArray(Charsets.UTF_8)
+        session.callback.onWsFrame(connId, 0x1, true, ackBytes)
     }
 
     // ==========================================
@@ -323,19 +276,6 @@ object NativeProxyEngine {
         }
         val socketIoConnect = "40$connAck".toByteArray(Charsets.UTF_8)
         session.callback.onWsFrame(connId, 0x1, true, socketIoConnect)
-
-        // 3. Join default room announcement ('42["joined_room", {...}]')
-        delay(500)
-        val roomJoinEvent = JSONArray().apply {
-            put("room_status")
-            put(JSONObject().apply {
-                put("room", "general_inproc")
-                put("status", "CONNECTED")
-                put("members_count", 4)
-            })
-        }
-        val joinPkt = "42$roomJoinEvent".toByteArray(Charsets.UTF_8)
-        session.callback.onWsFrame(connId, 0x1, true, joinPkt)
 
         // Engine.IO Heartbeat Pings (code '2')
         while (session.isRunning.get()) {
